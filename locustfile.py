@@ -1,42 +1,57 @@
-from locust import HttpUser, task, between
+from locust import HttpUser, task, between, events
 import random
-import pdb
+from dotenv import load_dotenv
+import os
 
+# Load environment variables from .env file
+load_dotenv()
 
 
 class OdooUser(HttpUser):
-    host = ""  # Add this line
-    wait_time = between(1, 2)  # Simulate real user wait time between tasks
-    return_admin_1 = True
+    host = os.getenv("ODOO_HOST")
+    db_name = os.getenv("ODOO_DB_NAME")
+    wait_time = between(1, 2)
+    admin_users = [f"admin{i}" for i in range(1, int(os.getenv("NUM_ADMIN_USERS")) + 1)]
+    current_user_index = 0
 
     def on_start(self):
         """Log in as an admin user when the user starts."""
         self.login()
 
-    def login(self):
+    def login_old(self):
         """Log in to Odoo."""
-        if OdooUser.return_admin_1:
-            response = self.client.post("/web/session/authenticate", json={
-                "params": {
-                    "db": "",  # Replace with your Odoo database name
-                    "login": "",  # Replace with your admin user email
-                    "password": "",  # Replace with your admin user password
-                }
-            }, name='login1')
-        else:
-            response = self.client.post("/web/session/authenticate", json={
-                "params": {
-                    "db": "",  # Replace with your Odoo database name
-                    "login": "",  # Replace with your admin user email
-                    "password": "",  # Replace with your admin user password
-                }
-            }, name='login2')
-
-        OdooUser.return_admin_1 = not OdooUser.return_admin_1
+        response = self.client.post("/web/session/authenticate", json={
+            "params": {
+                "db": self.db_name,  # Replace with your Odoo database name
+                "login": "admin",  # Replace with your admin user email
+                "password": "admin",  # Replace with your admin user password
+            }
+        }, name='login1')
         if response.status_code != 200:
             raise Exception("Login failed")
         self.session_id = response.cookies.get("session_id")
         print("Logged in successfully")
+
+    def login(self):
+        """Log in to Odoo using round-robin for admin users."""
+        username = OdooUser.admin_users[OdooUser.current_user_index]
+        OdooUser.current_user_index = (OdooUser.current_user_index + 1) % len(OdooUser.admin_users)
+
+        response = self.client.post("/web/session/authenticate", json={
+            "params": {
+                "db": self.db_name,  # Replace with your Odoo database name
+                "login": "admin2",  # Replace with your admin user email
+                "password": "admin123456",  # Replace with your admin user password
+            }
+        }, name=f'login')
+        # print(response.json())
+
+        if response.status_code != 200:
+            raise Exception("Login failed")
+        self.session_id = response.cookies.get("session_id")
+        if not self.session_id:
+            raise Exception(f"Failed to log in for user {username}")
+        print(f"Logged in successfully as {username}")
 
     @task
     def create_sales_order(self):
@@ -127,41 +142,41 @@ class OdooUser(HttpUser):
         print(f"Random product ID: {product_id}")  # Debugging output
         return product_id
 
-    # @task
-    # def download_sales_order_report(self):
-    #     """Simulate downloading a sales order report without saving the PDF."""
-    #     # Step 1: Search for a random sales order
-    #     response = self.client.post("/web/dataset/call_kw/sale.order/search_read", json={
-    #         "params": {
-    #             "model": "sale.order",
-    #             "method": "search_read",
-    #             "args": [[]],  # Search for orders not in 'Done' status
-    #             "kwargs": {"limit": 1},
-    #         },
-    #         "session_id": self.session_id,
-    #     }, name='search_sales_order')
-    #     if response.status_code != 200:
-    #         print("Failed to search for sales orders")
-    #         return
-    #
-    #     orders = response.json().get("result", [])
-    #     if not orders:
-    #         print("No sales orders found to generate a report")
-    #         return
-    #
-    #     # Step 2: Randomly select a sales order
-    #     order = random.choice(orders)
-    #     order_id = order["id"]
-    #     print(f"Selected sales order for report: {order_id}")
-    #
-    #     # Step 3: Simulate downloading the report
-    #     report_url = f"/report/pdf/sale.report_saleorder/{order_id}"
-    #     response = self.client.get(
-    #         report_url,
-    #         headers={"Cookie": f"session_id={self.session_id}"},
-    #         name="download_sales_order_report",
-    #     )
-    #     if response.status_code == 200:
-    #         print(f"Successfully simulated download of report for sales order {order_id}")
-    #     else:
-    #         print(f"Failed to download report for sales order {order_id}")
+# @task
+# def download_sales_order_report(self):
+#     """Simulate downloading a sales order report without saving the PDF."""
+#     # Step 1: Search for a random sales order
+#     response = self.client.post("/web/dataset/call_kw/sale.order/search_read", json={
+#         "params": {
+#             "model": "sale.order",
+#             "method": "search_read",
+#             "args": [[]],  # Search for orders not in 'Done' status
+#             "kwargs": {"limit": 1},
+#         },
+#         "session_id": self.session_id,
+#     }, name='search_sales_order')
+#     if response.status_code != 200:
+#         print("Failed to search for sales orders")
+#         return
+#
+#     orders = response.json().get("result", [])
+#     if not orders:
+#         print("No sales orders found to generate a report")
+#         return
+#
+#     # Step 2: Randomly select a sales order
+#     order = random.choice(orders)
+#     order_id = order["id"]
+#     print(f"Selected sales order for report: {order_id}")
+#
+#     # Step 3: Simulate downloading the report
+#     report_url = f"/report/pdf/sale.report_saleorder/{order_id}"
+#     response = self.client.get(
+#         report_url,
+#         headers={"Cookie": f"session_id={self.session_id}"},
+#         name="download_sales_order_report",
+#     )
+#     if response.status_code == 200:
+#         print(f"Successfully simulated download of report for sales order {order_id}")
+#     else:
+#         print(f"Failed to download report for sales order {order_id}")
